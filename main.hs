@@ -215,6 +215,16 @@ isColorMovePossible mv color (BoardState wp bp) = mv `elem` getAllPossibleColorM
     where
         allPawns = wp ++ bp
 
+getInputUntilMovePossible :: Color -> BoardState -> IO Move
+getInputUntilMovePossible color (BoardState w b) = do
+    raw <- getLine
+    let move = createMove $ parseHumanInput raw 
+    let movePossible = isColorMovePossible move color (BoardState w b)
+    print $ if movePossible then moveToReadable move else "Nieprawidlowy ruch. Sprobuj ponownie"
+    if movePossible
+    then return move
+    else getInputUntilMovePossible color (BoardState w b)
+
 createMove :: [Position] -> Move
 createMove ps = Move (head ps) (last ps)
 
@@ -270,9 +280,15 @@ singlePlayerGame = do
         White -> playerPlaysWhite startingBoard
         Black -> playerPlaysBlack startingBoard True
 
-multiPlayerGame :: IO ()
-multiPlayerGame = do
-    print 0
+multiPlayerGame :: BoardState -> IO ()
+multiPlayerGame (BoardState w b) = do
+    putStr $ generateBoardRepr (BoardState w b)
+    whiteMove <- getInputUntilMovePossible White (BoardState w b)
+    let newWhite = performMove whiteMove w
+    putStr $ generateBoardRepr (BoardState newWhite b)
+    blackMove <- getInputUntilMovePossible Black (BoardState newWhite b)
+    let newBlack = performMove blackMove b
+    if allFinished newWhite then print "Bialy wygral" else (if allFinished newBlack then print "Czarny wygral" else multiPlayerGame (BoardState newWhite newBlack))
 
 determineGameType :: String -> GameType
 determineGameType line = case head line of
@@ -286,7 +302,7 @@ game = do
     let gameType = determineGameType line
     case gameType of
         Singleplayer -> singlePlayerGame
-        Multiplayer -> multiPlayerGame
+        Multiplayer -> multiPlayerGame startingBoard 
 
 startingBoard = BoardState [Pawn (Position x y) False White | x <- [0..7], y <- [6..7]] [Pawn (Position x y) False Black | x <- [0..7], y <- [0..1]]
 main = game
