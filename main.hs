@@ -110,13 +110,13 @@ getPossiblePawnMoves (Pawn currentPosition f c) pawns = filterOutIllegalMoves $ 
         simpleNewPositions = filter (\square -> square `notElem` map (\(Pawn pos _ _) -> pos) pawns) $ getAdjacentSquares currentPosition
         jumpingNewPositions = tail $ getJumpPositions currentPosition [] (filter (/= Pawn currentPosition f c) pawns)
 
-
-
 getAllPossibleColorMoves :: Color -> [Pawn] -> [Move]
-getAllPossibleColorMoves color1 pawns = concatMap (`getPossiblePawnMoves` pawns) (filter (\(Pawn _ finished color2) -> not finished && color1 == color2) pawns)
+getAllPossibleColorMoves color1 pawns = concatMap (`getPossiblePawnMoves` pawns) (filter (\(Pawn _ _ color2) -> color1 == color2) pawns)
 
-getMoveGreedyValue :: Move -> Int
-getMoveGreedyValue (Move (Position x1 y1) (Position x2 y2)) = y2 - y1
+getMoveGreedyValue :: Color -> Move -> Int
+getMoveGreedyValue color (Move (Position x1 y1) (Position x2 y2))
+    | color == Black = y2 - y1
+    | color == White = y1 - y2
 
 generateRowString :: Int -> [Pawn] -> String
 generateRowString 0 [] = "|" ++ concat (replicate 8 "   |")
@@ -153,10 +153,10 @@ digitToInt :: Char -> Maybe Int
 digitToInt c = lookup c (zip ['0'..'9'] [0..9])
 
 opponentMove :: Color -> BoardState -> Move
-opponentMove color (BoardState whitePawns blackPawns) = head $ filter (\move -> getMoveGreedyValue move == max_value) possible_moves
+opponentMove color (BoardState whitePawns blackPawns) = head $ filter (\move -> getMoveGreedyValue color move == max_value) possible_moves
     where
         possible_moves = getAllPossibleColorMoves color (whitePawns++blackPawns)
-        max_value = maximum $ map getMoveGreedyValue possible_moves
+        max_value = maximum $ map (getMoveGreedyValue color) possible_moves
 
 parseHumanPosition :: String -> [Position]
 parseHumanPosition [] = []
@@ -183,6 +183,21 @@ parseHumanColor inp = case head inp of
     'X' -> Black
     'O' -> White
 
+moveToReadable :: Move -> String
+moveToReadable (Move a b) = positionToReadable a ++ "-" ++ positionToReadable b
+
+positionToReadable :: Position -> String
+positionToReadable (Position x y) = case x of
+    0 -> "A" ++ show (y+1)
+    1 -> "B" ++ show (y+1)
+    2 -> "C" ++ show (y+1)
+    3 -> "D" ++ show (y+1)
+    4 -> "E" ++ show (y+1)
+    5 -> "F" ++ show (y+1)
+    6 -> "G" ++ show (y+1)
+    7 -> "H" ++ show (y+1)
+    _ -> "" ++ show (y+1)
+
 humanMove :: Color -> BoardState -> Winner
 humanMove humanColor (BoardState whitePawns blackPawns) = if hasOpponentWon then opponentColor else do
     -- let humanPositionChanges = parseHumanInput $ getLine
@@ -195,34 +210,67 @@ humanMove humanColor (BoardState whitePawns blackPawns) = if hasOpponentWon then
             White -> allFinished whitePawns
             Black -> allFinished blackPawns
 
-isMovePossible :: Move -> BoardState -> Bool
-isMovePossible mv bs = getAllPossibleColorMoves
+isColorMovePossible :: Move -> Color -> BoardState -> Bool
+isColorMovePossible mv color (BoardState wp bp) = mv `elem` getAllPossibleColorMoves color allPawns
+    where
+        allPawns = wp ++ bp
 
-pawnsBlack = [Pawn (Position i j) False Black | i <- [0..7], j <- [0..1]]
-pawnsWhite= [Pawn (Position i j) False White | i <- [0..7], j <- [6..7]]
-pawns = pawnsBlack ++ pawnsWhite
-pawnsNew = performMove (Move (Position 0 1) (Position 0 2)) pawns
+createMove :: [Position] -> Move
+createMove ps = Move (head ps) (last ps)
 
 playerPlaysWhite :: BoardState -> IO ()
 playerPlaysWhite (BoardState w b) = do
     putStr $ generateBoardRepr (BoardState w b)
     mv <- getLine
-    let move = parseHumanInput mv
-    print move
+    let move = createMove $ parseHumanInput mv
+    let movePossible = isColorMovePossible move White (BoardState w b)
+    let newWhite = performMove move w
+    let newBoard = BoardState newWhite b
+    let opMove = opponentMove Black newBoard
+    let whiteWon = movePossible && allFinished newWhite 
+    let newBlack = performMove opMove b
+    let finalBoard = BoardState newWhite newBlack
+    let blackWon = allFinished newBlack
+    let anyWon = whiteWon || blackWon
+    print (if whiteWon then "Bialy wygral" else (if blackWon then "Czarny wygral" else (if movePossible then "Przeciwnik rusza " ++ moveToReadable opMove else "Nieprawidlowy ruch")))
+    if anyWon then print "koniec" else if movePossible then playerPlaysWhite finalBoard else playerPlaysWhite (BoardState w b)
 
-playerPlaysBlack :: BoardState -> IO ()
-playerPlaysBlack board = do
-    print 4
+playerPlaysBlack :: BoardState -> Bool -> IO ()
+playerPlaysBlack (BoardState w b) firstTurn = do
+    putStr $ generateBoardRepr (BoardState w b)
+    -- postPlayerBlack
+    let prePlayerOpMove = opponentMove White $ BoardState w b
+    let prePlayerWhite = performMove prePlayerOpMove w
+    let currentBoard = if firstTurn then BoardState prePlayerWhite b else BoardState w b
+    print $ if firstTurn then "Przeciwnik rusza " ++ moveToReadable prePlayerOpMove else ""
+    putStr $ if firstTurn then generateBoardRepr currentBoard else ""
+    let prePlayerWhiteWon = allFinished prePlayerWhite 
+    mv <- getLine
+    let move = createMove $ parseHumanInput mv
+    let movePossible = isColorMovePossible move Black currentBoard
+    let BoardState currentWhite currentBlack = currentBoard
+    let postPlayerBlack = performMove move currentBlack
+    let blackWon = movePossible && allFinished postPlayerBlack
+    putStr $ generateBoardRepr $ BoardState currentWhite currentBlack
+    let opMove = opponentMove White $ BoardState currentWhite postPlayerBlack
+    let newWhite = performMove opMove currentWhite
+    let finalBoard = BoardState newWhite postPlayerBlack
+    let whiteWon = allFinished newWhite
+    let anyWon = whiteWon || blackWon
+    print (if whiteWon then "Bialy wygral" else (if blackWon then "Czarny wygral" else (if movePossible then "Przeciwnik rusza " ++ moveToReadable opMove else "Nieprawidlowy ruch")))
+    if anyWon then print "koniec" else if movePossible then playerPlaysBlack finalBoard False else (if firstTurn then playerPlaysBlack (BoardState prePlayerWhite b) False else playerPlaysBlack (BoardState w b) False)
 
+singlePlayerGame :: IO ()
 singlePlayerGame = do
     putStr "Wybierz kolor (X - czarne, O - biale):\n\n"
     line <- getLine 
     let color = parseHumanColor line
-    putStr $ generateBoardRepr pawns
+    putStr $ generateBoardRepr startingBoard
     case color of
-        White -> playerPlaysWhite pawns
-        Black -> playerPlaysBlack pawns
+        White -> playerPlaysWhite startingBoard
+        Black -> playerPlaysBlack startingBoard True
 
+multiPlayerGame :: IO ()
 multiPlayerGame = do
     print 0
 
@@ -240,6 +288,5 @@ game = do
         Singleplayer -> singlePlayerGame
         Multiplayer -> multiPlayerGame
 
-color = "xx"
-main = do
-    game
+startingBoard = BoardState [Pawn (Position x y) False White | x <- [0..7], y <- [6..7]] [Pawn (Position x y) False Black | x <- [0..7], y <- [0..1]]
+main = game
